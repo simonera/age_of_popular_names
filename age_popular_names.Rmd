@@ -1,0 +1,129 @@
+---
+title: "Predicted age of most popular names in the US"
+author: "Simone Rambotti"
+date: "2022-08-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+## An example of data collection with APIs in R
+
+In this project, I show how to use APIs in R to collect data. These [three](https://alyssafuward.com/2019/02/09/access-reddit-data-using-r-and-the-api/) [great](https://www.dataquest.io/blog/r-api-tutorial/) [posts](https://statisticsglobe.com/api-in-r) were a source of inspiration and guidance. In [their post](https://statisticsglobe.com/api-in-r), Joachim Schork and Kirby White provide this definition of APIs:
+
+> An API (Application Programming Interface) is an intermediary between a dataset (usually a very large one) and the rest of the world (like us!) APIs provide an accessible way to request a dataset. which is referred to as making a “call” to the API. A call is sent to the API by opening a web address.
+
+For this project, I wanted to use a free API that requires no sign-up or key. I decided to use [Agify](https://agify.io/), which predicts the age of a person given their name. Which names should I predict? I decided to use the most popular names in the United States in the last 100 years, which are available at the [Social Security Administration](https://www.ssa.gov/oact/babynames/decades/century.html).
+
+It would be interesting to do a scatter plot and see the predicted age of the most popular names. I think we should expect a positive relationship. If these names are the most popular during the last 100 years, they have probably been quite popular for some time, so the predicted age should be high. However, some names may be still popular among young people and bring the predicted age down. Let’s see. 
+
+## Load the libraries
+
+First, I'm goint to load the libraries I need:
+
+```{r libraries}
+library(readr)
+library(httr)
+library(jsonlite)
+library(ggplot2)
+library(ggrepel)
+library(scales)
+```
+
+I use `readr` to import data. With `httr`, I can get the data from the API and with `jsonlite`, I can transform the JSON file into a data frame. I use `ggplot2`, `ggrepel`, and `scales` for the visualization. 
+
+## Get the data
+
+First of all, I need to get the most popular names. I scraped the table using the `IMPORTHTML` function in Google Sheet, specifically this command:
+
+`=IMPORTHTML("https://www.ssa.gov/oact/babynames/decades/century.html", "table", 1)`
+
+I will use this table to create a list of the most popular names, which I'll use in a loop. But first, I want to get the predicted age of the most popular male name: James.
+
+```{r james}
+age <- GET("https://api.agify.io?name=james&country_id=US")
+age
+age$content
+rawToChar(age$content)
+mydata <- fromJSON(rawToChar(age$content))
+mydata$age
+mydata <- as.data.frame(mydata)
+head(mydata)
+```
+
+The `GET` command accesses the data for the name James. The predicted age is 59. I specify `&country_id=US` to focus only on the predicted age in the US. The `rawToChar` function ["converts the raw Unicode into a character vector that resembles the JSON format"](https://www.dataquest.io/blog/r-api-tutorial/). The `fromJSON` function turns the JSON format into a format that is easier to manipulate in R. In fact, we can just turn into a data frame. 
+
+Now, I got the predicted age for James. We need a loop to get the predicted age for the other names. To do that, I go back to the sheet imported from the SSA. I cleaned it up directly in Google Sheet. Because I already have the predicted age for James, I drop it from the CSV. Also, notice: Agify has no predicted age for Maria in the US, so I just dropped it. Then, I downloaded the sheet as CSV and imported it into R with the following code:
+
+```{r import csv}
+popular <- read_csv("https://raw.githubusercontent.com/simonera/age_of_popular_names/main/most_popular_names_in_the_us.csv", 
+                    col_names = FALSE)
+popular <- as.list(popular)
+clist <- (c(popular))
+clist
+```
+
+As you can see, I also transformed this data frame into a list, I guess there may be a direct way to do that, but the result is that we have a list of the popular names called `clist`.
+
+The next step is using this list of names to create a list of URLs, which I’ll then use in a loop. The following code will do that:
+
+```{r url list}
+for (i in clist) {
+  urlpart1 <- "https://api.agify.io?name="
+  urlpart2 <- "&country_id=US"
+  api_url <- paste0(urlpart1, i, urlpart2)
+}
+```
+
+`paste0` concatenates vectors after converting to character vectors. Now, I create an object called `api_url`, which is a list of URLs for each of the most popular names in the US:
+
+```{r url list 2}
+api_url <- as.list(api_url)
+clist <- (c(api_url))
+```
+
+With this list, I can create a loop that communicates with the Agify’s API and gets the predicted age for each name:
+
+```{r loop}
+for (i in clist) {
+  age <- GET(i)
+  rawToChar(age$content)
+  mytempdata <- fromJSON(rawToChar(age$content))
+  mytempdata <- as.data.frame(mytempdata)
+  mydata <- rbind(mydata, mytempdata)
+}
+
+write.csv(mydata, "age.csv")
+```
+
+We have a data frame with the predicted age for each name: mydata. I downloaded it and combined it with the SSA data on the popularity of each name (that is, how many times each name appears in a ["universe that includes 177,238,032 male births and 172,053,794 female births"](https://www.ssa.gov/oact/babynames/decades/century.html). After joining these two data sets, I can import the combined result as a CSV:
+
+```{r import combined data set}
+popular_age <- read_csv("https://raw.githubusercontent.com/simonera/age_of_popular_names/main/most_popular_names_in_the_us_vs_age.csv")
+```
+
+Time to plot! I'm creating a scatter plot with `ggplot2`. I'll color the dots and lines by sex. I use the function `scale_y_continuous` from the package `scales` to turn scientific notations into conventional numbers. I use `geom_text_repel` to offset the labels. I also use an `ifelse` statement because I want the labels only for names that have a frequency higher than 1 million and a predicted age lower than 40. Let's see!
+
+```{r plot, fig.width = 11, fig.height = 7}
+myplot <- ggplot(data = popular_age, 
+                 aes(x = Age, y = Count, colour = Sex, label = Name)) + 
+  scale_y_continuous(labels = comma) +
+  geom_point() + 
+  geom_text_repel(aes(label=ifelse(Count>1000000, Name, '')), max.overlaps = Inf, show.legend	= FALSE) +
+  geom_text_repel(aes(label=ifelse(Age<40, Name, '')), max.overlaps = Inf, show.legend	= FALSE) +
+  stat_smooth(method = 'gam', se = FALSE) +
+  labs(title = "Predicted Age of the Top Names in the US, 1922-2021",
+       subtitle = "Based on a sample of 177,238,032 male births and 172,053,794 female births",
+       caption = "Sources: United States Social Security Administration; Agify.io
+       Created by Simone Rambotti, August 2022")
+
+myplot
+```
+
+As we can see, the popularity of a name does not predict its age. It's possible to see some patterns. For example, the most popular names have high predicted age (top right corner). In other words, the top left corner is empty. And younger names are less popular (bottom left corner). That being said, the relationship here is very weak to nonexistent. However, it was a fun project and I hope it may be helpful to anyone who wants to experiment with APIs and loops.
