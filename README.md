@@ -6,3 +6,4 @@ It includes:
 - `age.csv`: their predicted age 
 - `most_popular_names_in_the_us_vs_age.csv`: their predicted age vs. their count in the SSA database 
 - `age_popular_names.Rmd`: RMarkdown file used in [my website](https://sites.google.com/view/simone-rambotti/portfolio/age_of_popular_names)
+- `age_popular_names.R`: R script for the plot
